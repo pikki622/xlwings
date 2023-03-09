@@ -72,17 +72,15 @@ class Collection:
         if isinstance(key, numbers.Number):
             length = len(self)
             if key >= length:
-                raise IndexError("Index %s out of range (%s elements)" % (key, length))
+                raise IndexError(f"Index {key} out of range ({length} elements)")
             if key < 0:
                 if key < -length:
-                    raise IndexError(
-                        "Index %s out of range (%s elements)" % (key, length)
-                    )
+                    raise IndexError(f"Index {key} out of range ({length} elements)")
                 key += length
             return self(key + 1)
         elif isinstance(key, slice):
             raise ValueError(
-                self.impl.__class__.__name__ + " object does not support slicing"
+                f"{self.impl.__class__.__name__} object does not support slicing"
             )
         else:
             return self(key)
@@ -104,7 +102,7 @@ class Collection:
             else:
                 r.append(repr(x))
 
-        return "{}({})".format(self._name, "[" + ", ".join(r) + "]")
+        return f'{self._name}({"[" + ", ".join(r) + "]"})'
 
 
 class Engines:
@@ -130,26 +128,24 @@ class Engines:
     def __getitem__(self, name_or_index):
         if isinstance(name_or_index, numbers.Number):
             return self.engines[name_or_index]
-        else:
-            try:
-                return self.engines_by_name[name_or_index]
-            except KeyError:
-                if not xlwings.__pro__ and name_or_index in ["calamine", "remote"]:
-                    raise LicenseError(
-                        f"The '{name_or_index}' engine requires xlwings PRO."
-                    )
-                else:
-                    raise
+        try:
+            return self.engines_by_name[name_or_index]
+        except KeyError:
+            if not xlwings.__pro__ and name_or_index in ["calamine", "remote"]:
+                raise LicenseError(
+                    f"The '{name_or_index}' engine requires xlwings PRO."
+                )
+            else:
+                raise
 
     def __len__(self):
         return len(self.engines)
 
     def __iter__(self):
-        for engine in self.engines:
-            yield engine
+        yield from self.engines
 
     def __repr__(self):
-        return "{}({})".format(self.__class__.__name__, repr(list(self)))
+        return f"{self.__class__.__name__}({repr(list(self))})"
 
 
 class Engine:
@@ -217,9 +213,7 @@ class Apps:
         return self[i]
 
     def __repr__(self):
-        return "{}({})".format(
-            getattr(self.__class__, "_name", self.__class__.__name__), repr(list(self))
-        )
+        return f'{getattr(self.__class__, "_name", self.__class__.__name__)}({repr(list(self))})'
 
     def __getitem__(self, item):
         return App(impl=self.impl[item])
@@ -358,12 +352,11 @@ class App:
         # Win Excel >= 2013 fails if visible=False...
         # we may somehow not be using the correct HWND
         self.impl.activate(steal_focus)
-        if self.engine.name != "remote":
-            if self != apps.active:
-                raise Exception(
-                    "Could not activate App! "
-                    "Try to instantiate the App with visible=True."
-                )
+        if self.engine.name != "remote" and self != apps.active:
+            raise Exception(
+                "Could not activate App! "
+                "Try to instantiate the App with visible=True."
+            )
 
     @property
     def visible(self):
@@ -884,28 +877,27 @@ class Book:
     ):
         if not impl:
             if json:
-                engine = engine if engine else "remote"
+                engine = engine or "remote"
                 impl = engines[engine].apps.active.books.open(json=json).impl
             elif fullname and mode == "r":
-                engine = engine if engine else "calamine"
+                engine = engine or "calamine"
                 impl = engines[engine].apps.active.books.open(fullname=fullname).impl
             elif fullname:
                 fullname = utils.fspath(fullname)
 
                 candidates = []
                 for app in apps:
-                    for wb in app.books:
-                        # Comparing by name first saves us from having to compare the
-                        # fullname for non-candidates, which can get around issues in
-                        # case the fullname is a problematic URL (GH 1946)
-                        if wb.name.lower() == os.path.split(fullname)[1].lower() and (
+                    candidates.extend(
+                        (app, wb)
+                        for wb in app.books
+                        if wb.name.lower() == os.path.split(fullname)[1].lower()
+                        and (
                             wb.fullname.lower() == fullname.lower()
                             or wb.name.lower() == fullname.lower()
-                        ):
-                            candidates.append((app, wb))
-
+                        )
+                    )
                 app = apps.active
-                if len(candidates) == 0:
+                if not candidates:
                     if not app:
                         app = App(add_book=False)
                     impl = app.books.open(
@@ -927,18 +919,15 @@ class Book:
                     ).impl
                 elif len(candidates) > 1:
                     raise Exception(
-                        "Workbook '%s' is open in more than one Excel instance."
-                        % fullname
+                        f"Workbook '{fullname}' is open in more than one Excel instance."
                     )
                 else:
                     impl = candidates[0][1].impl
+            elif apps.active:
+                impl = apps.active.books.add().impl
             else:
-                # Open Excel if necessary and create a new workbook
-                if apps.active:
-                    impl = apps.active.books.add().impl
-                else:
-                    app = App()
-                    impl = app.books[0].impl
+                app = App()
+                impl = app.books[0].impl
 
         self.impl = impl
 
@@ -1333,10 +1322,7 @@ class Sheet:
     """
 
     def __init__(self, sheet=None, impl=None):
-        if impl is None:
-            self.impl = books.active.sheets(sheet).impl
-        else:
-            self.impl = impl
+        self.impl = books.active.sheets(sheet).impl if impl is None else impl
 
     @property
     def api(self):
@@ -1505,7 +1491,7 @@ class Sheet:
         .. versionadded:: 0.28.1
         """
         path = utils.fspath(path)
-        self.impl.to_html(self.name + ".html" if path is None else path)
+        self.impl.to_html(f"{self.name}.html" if path is None else path)
 
     def to_pdf(self, path=None, layout=None, show=False, quality="standard"):
         """
@@ -1551,7 +1537,7 @@ class Sheet:
         .. versionadded:: 0.22.3
         """
         return self.book.to_pdf(
-            self.name + ".pdf" if path is None else path,
+            f"{self.name}.pdf" if path is None else path,
             include=self.index,
             layout=layout,
             show=show,
@@ -1615,9 +1601,8 @@ class Sheet:
         if after:
             target_book = after.book
             after = after.impl
-        if name:
-            if name.lower() in (s.name.lower() for s in target_book.sheets):
-                raise ValueError(f"Sheet named '{name}' already present in workbook")
+        if name and name.lower() in (s.name.lower() for s in target_book.sheets):
+            raise ValueError(f"Sheet named '{name}' already present in workbook")
         sheet_names_before = {sheet.name for sheet in target_book.sheets}
         self.impl.copy(before=before, after=after)
         sheet_names_after = {sheet.name for sheet in target_book.sheets}
@@ -1728,10 +1713,7 @@ class Sheet:
         return PageSetup(self.impl.page_setup)
 
     def __getitem__(self, item):
-        if isinstance(item, str):
-            return self.range(item)
-        else:
-            return self.cells[item]
+        return self.range(item) if isinstance(item, str) else self.cells[item]
 
     def __repr__(self):
         return "<Sheet [{1}]{0}>".format(self.name, self.book.name)
@@ -2232,22 +2214,20 @@ class Range:
         .. versionadded:: 0.2.3
         """
 
-        if include_sheetname and not external:
-            # TODO: when the Workbook name contains spaces but not the Worksheet name,
-            #  it will still be surrounded
-            # by '' when include_sheetname=True. Also, should probably changed to regex
-            temp_str = self.impl.get_address(row_absolute, column_absolute, True)
-
-            if temp_str.find("[") > -1:
-                results_address = temp_str[temp_str.rfind("]") + 1 :]
-                if results_address.find("'") > -1:
-                    results_address = "'" + results_address
-                return results_address
-            else:
-                return temp_str
-
-        else:
+        if not include_sheetname or external:
             return self.impl.get_address(row_absolute, column_absolute, external)
+        # TODO: when the Workbook name contains spaces but not the Worksheet name,
+        #  it will still be surrounded
+        # by '' when include_sheetname=True. Also, should probably changed to regex
+        temp_str = self.impl.get_address(row_absolute, column_absolute, True)
+
+        if temp_str.find("[") <= -1:
+            return temp_str
+
+        results_address = temp_str[temp_str.rfind("]") + 1 :]
+        if results_address.find("'") > -1:
+            results_address = f"'{results_address}"
+        return results_address
 
     @property
     def address(self):
@@ -2438,12 +2418,11 @@ class Range:
                 if row < 0:
                     row += n
                 if row < 0 or row >= n:
-                    raise IndexError("Row index %s out of range (%s rows)." % (row, n))
+                    raise IndexError(f"Row index {row} out of range ({n} rows).")
                 row1 = row2 = row
             else:
                 raise TypeError(
-                    "Row indices must be integers or slices, not %s"
-                    % type(row).__name__
+                    f"Row indices must be integers or slices, not {type(row).__name__}"
                 )
 
             n = self.shape[1]
@@ -2456,14 +2435,11 @@ class Range:
                 if col < 0:
                     col += n
                 if col < 0 or col >= n:
-                    raise IndexError(
-                        "Column index %s out of range (%s columns)." % (col, n)
-                    )
+                    raise IndexError(f"Column index {col} out of range ({n} columns).")
                 col1 = col2 = col
             else:
                 raise TypeError(
-                    "Column indices must be integers or slices, not %s"
-                    % type(col).__name__
+                    f"Column indices must be integers or slices, not {type(col).__name__}"
                 )
 
             return self.sheet.range(
@@ -2481,22 +2457,18 @@ class Range:
                     "One-dimensional slicing is not allowed on two-dimensional ranges"
                 )
 
-            if self.shape[0] > 1:
-                return self[key, :]
-            else:
-                return self[:, key]
-
+            return self[key, :] if self.shape[0] > 1 else self[:, key]
         elif isinstance(key, int):
             n = len(self)
             k = key + n if key < 0 else key
             if k < 0 or k >= n:
-                raise IndexError("Index %s out of range (%s elements)." % (key, n))
+                raise IndexError(f"Index {key} out of range ({n} elements).")
             else:
                 return self(k + 1)
 
         else:
             raise TypeError(
-                "Cell indices must be integers or slices, not %s" % type(key).__name__
+                f"Cell indices must be integers or slices, not {type(key).__name__}"
             )
 
     def __repr__(self):
@@ -2605,16 +2577,15 @@ class Range:
 
         .. versionadded:: 0.3.0
         """
-        if self.formula.lower().startswith("="):
-            # If it's a formula, extract the URL from the formula string
-            formula = self.formula
-            try:
-                return re.compile(r"\"(.+?)\"").search(formula).group(1)
-            except AttributeError:
-                raise Exception("The cell doesn't seem to contain a hyperlink!")
-        else:
+        if not self.formula.lower().startswith("="):
             # If it has been set pragmatically
             return self.impl.hyperlink
+        # If it's a formula, extract the URL from the formula string
+        formula = self.formula
+        try:
+            return re.compile(r"\"(.+?)\"").search(formula)[1]
+        except AttributeError:
+            raise Exception("The cell doesn't seem to contain a hyperlink!")
 
     def add_hyperlink(self, address, text_to_display=None, screen_tip=None):
         """
@@ -2638,11 +2609,9 @@ class Range:
         if text_to_display is None:
             text_to_display = address
         if address[:4] == "www.":
-            address = "http://" + address
+            address = f"http://{address}"
         if screen_tip is None:
-            screen_tip = (
-                address + " - Click once to follow. Click and hold to select this cell."
-            )
+            screen_tip = f"{address} - Click once to follow. Click and hold to select this cell."
         self.impl.add_hyperlink(address, text_to_display, screen_tip)
 
     def resize(self, row_size=None, column_size=None):
@@ -2767,10 +2736,7 @@ class Range:
 
         .. versionadded:: 0.21.0
         """
-        if self.impl.table:
-            return Table(impl=self.impl.table)
-        else:
-            return None
+        return Table(impl=self.impl.table) if self.impl.table else None
 
     @property
     def wrap_text(self):
@@ -2843,9 +2809,9 @@ class Range:
                 .replace(" ", "")
             )
             if directory:
-                path = os.path.join(directory, default_name + ".png")
+                path = os.path.join(directory, f"{default_name}.png")
             else:
-                path = str(Path.cwd() / default_name) + ".png"
+                path = f"{str(Path.cwd() / default_name)}.png"
         self.impl.to_png(path)
 
     def to_pdf(self, path=None, layout=None, show=None, quality="standard"):
@@ -2958,7 +2924,7 @@ class RangeRows(Ranges):
         self.rng.impl.autofit(axis="r")
 
     def __iter__(self):
-        for i in range(0, self.rng.shape[0]):
+        for i in range(self.rng.shape[0]):
             yield self.rng[i, :]
 
     def __call__(self, key):
@@ -2971,11 +2937,11 @@ class RangeRows(Ranges):
             return self.rng[key, :]
         else:
             raise TypeError(
-                "Indices must be integers or slices, not %s" % type(key).__name__
+                f"Indices must be integers or slices, not {type(key).__name__}"
             )
 
     def __repr__(self):
-        return "{}({})".format(self.__class__.__name__, repr(self.rng))
+        return f"{self.__class__.__name__}({repr(self.rng)})"
 
 
 class RangeColumns(Ranges):
@@ -3025,7 +2991,7 @@ class RangeColumns(Ranges):
         self.rng.impl.autofit(axis="c")
 
     def __iter__(self):
-        for j in range(0, self.rng.shape[1]):
+        for j in range(self.rng.shape[1]):
             yield self.rng[:, j]
 
     def __call__(self, key):
@@ -3038,11 +3004,11 @@ class RangeColumns(Ranges):
             return self.rng[:, key]
         else:
             raise TypeError(
-                "Indices must be integers or slices, not %s" % type(key).__name__
+                f"Indices must be integers or slices, not {type(key).__name__}"
             )
 
     def __repr__(self):
-        return "{}({})".format(self.__class__.__name__, repr(self.rng))
+        return f"{self.__class__.__name__}({repr(self.rng)})"
 
 
 class Shape:
@@ -3599,70 +3565,66 @@ class Table:
                                            name=table_name).update(df)
         """
         type_error_msg = "Currently, only pandas DataFrames are supported by update"
-        if pd:
-            if not isinstance(data, pd.DataFrame):
-                raise TypeError(type_error_msg)
-            if data.empty:
-                nrows_data = 1
-            else:
-                nrows_data = len(data)
-            nrows_table = len(self.data_body_range.rows) if self.data_body_range else 1
-            row_diff = nrows_table - nrows_data
-            if data.empty:
-                ncols_data = 1
-            else:
-                ncols_data = (
-                    len(data.columns)
-                    if not index
-                    else len(data.columns) + len(data.index.names)
-                )
-            ncols_table = len(self.range.columns)
-            col_diff = ncols_table - ncols_data
-            cols_to_be_cleared = None
-            if col_diff > 0:
-                cols_to_be_cleared = self.range[:, ncols_table - col_diff :]
-            rows_to_be_cleared = None
-            if row_diff > 0 and self.data_body_range:
-                rows_to_be_cleared = self.data_body_range[nrows_table - row_diff :, :]
-            self.resize(
-                self.range[0, 0].resize(
-                    row_size=nrows_data + 1 if self.header_row_range else nrows_data,
-                    column_size=ncols_data,
-                )
-            )
-            # Clearing must happen after resizing as table headers will be replaced
-            # with Column1 etc. if deleted while still being part of table
-            if cols_to_be_cleared:
-                cols_to_be_cleared.clear_contents()
-            if rows_to_be_cleared:
-                rows_to_be_cleared.clear_contents()
-            if self.header_row_range:
-                # Tables with 'Header Row' checked
-                header = (
-                    (list(data.index.names) + list(data.columns))
-                    if index
-                    else list(data.columns)
-                )
-                # Replace None in the header with a unique number of spaces
-                n_empty = len([i for i in header if isinstance(i, str) and i.isspace()])
-                header = [
-                    " " * (i + n_empty + 1) if name is None else name
-                    for i, name in enumerate(header)
-                ]
-                self.header_row_range.value = header
-                self.range[1, 0].options(index=index, header=False).value = data
-            else:
-                # Tables with 'Header Row' unchecked
-                self.resize(self.range[0, 0])  # Otherwise the table will be deleted
-                self.range[0, 0].options(index=index, header=False).value = data
-                # If the top-left cell isn't empty, it doesn't manage to resize the
-                # columns automatically
-                self.resize(
-                    self.range[0, 0].resize(row_size=nrows_data, column_size=ncols_data)
-                )
-            return self
-        else:
+        if not pd:
             raise TypeError(type_error_msg)
+        if not isinstance(data, pd.DataFrame):
+            raise TypeError(type_error_msg)
+        nrows_data = 1 if data.empty else len(data)
+        nrows_table = len(self.data_body_range.rows) if self.data_body_range else 1
+        row_diff = nrows_table - nrows_data
+        if data.empty:
+            ncols_data = 1
+        else:
+            ncols_data = (
+                len(data.columns) + len(data.index.names)
+                if index
+                else len(data.columns)
+            )
+        ncols_table = len(self.range.columns)
+        col_diff = ncols_table - ncols_data
+        cols_to_be_cleared = (
+            self.range[:, ncols_table - col_diff :] if col_diff > 0 else None
+        )
+        rows_to_be_cleared = None
+        if row_diff > 0 and self.data_body_range:
+            rows_to_be_cleared = self.data_body_range[nrows_table - row_diff :, :]
+        self.resize(
+            self.range[0, 0].resize(
+                row_size=nrows_data + 1 if self.header_row_range else nrows_data,
+                column_size=ncols_data,
+            )
+        )
+        # Clearing must happen after resizing as table headers will be replaced
+        # with Column1 etc. if deleted while still being part of table
+        if cols_to_be_cleared:
+            cols_to_be_cleared.clear_contents()
+        if rows_to_be_cleared:
+            rows_to_be_cleared.clear_contents()
+        if self.header_row_range:
+            # Tables with 'Header Row' checked
+            header = (
+                (list(data.index.names) + list(data.columns))
+                if index
+                else list(data.columns)
+            )
+            # Replace None in the header with a unique number of spaces
+            n_empty = len([i for i in header if isinstance(i, str) and i.isspace()])
+            header = [
+                " " * (i + n_empty + 1) if name is None else name
+                for i, name in enumerate(header)
+            ]
+            self.header_row_range.value = header
+            self.range[1, 0].options(index=index, header=False).value = data
+        else:
+            # Tables with 'Header Row' unchecked
+            self.resize(self.range[0, 0])  # Otherwise the table will be deleted
+            self.range[0, 0].options(index=index, header=False).value = data
+            # If the top-left cell isn't empty, it doesn't manage to resize the
+            # columns automatically
+            self.resize(
+                self.range[0, 0].resize(row_size=nrows_data, column_size=ncols_data)
+            )
+        return self
 
     def resize(self, range):
         """Resize a Table by providing an xlwings range object
@@ -3992,9 +3954,9 @@ class Chart:
         if path is None:
             directory, _ = os.path.split(self.parent.book.fullname)
             if directory:
-                path = os.path.join(directory, self.name + ".png")
+                path = os.path.join(directory, f"{self.name}.png")
             else:
-                path = str(Path.cwd() / self.name) + ".png"
+                path = f"{str(Path.cwd() / self.name)}.png"
         self.impl.to_png(path)
 
     def to_pdf(self, path=None, show=None, quality="standard"):
@@ -4232,9 +4194,7 @@ class Picture:
         """
 
         filename, is_temp_file = utils.process_image(
-            image,
-            format="png" if not format else format,
-            export_options=export_options,
+            image, format=format or "png", export_options=export_options
         )
 
         picture = Picture(impl=self.impl.update(filename))
@@ -4377,22 +4337,20 @@ class Pictures(Collection):
         >>> sht.pictures.add(fig, name='MyPlot', update=True)
         <Picture 'MyPlot' in <Sheet [Book1]Sheet1>>
         """
-        if anchor:
-            if top or left:
-                raise ValueError(
-                    "You must either provide 'anchor' or 'top'/'left', but not both."
-                )
+        if anchor and (top or left):
+            raise ValueError(
+                "You must either provide 'anchor' or 'top'/'left', but not both."
+            )
         if update:
             if name is None:
                 raise ValueError("If update is true then name must be specified")
-            else:
-                try:
-                    pic = self[name]
-                    return pic.update(
-                        image, format=format, export_options=export_options
-                    )
-                except KeyError:
-                    pass
+            try:
+                pic = self[name]
+                return pic.update(
+                    image, format=format, export_options=export_options
+                )
+            except KeyError:
+                pass
 
         if name and name in self.parent.pictures:
             raise ShapeAlreadyExists(
@@ -4400,12 +4358,10 @@ class Pictures(Collection):
             )
 
         filename, is_temp_file = utils.process_image(
-            image,
-            format="png" if not format else format,
-            export_options=export_options,
+            image, format=format or "png", export_options=export_options
         )
 
-        if not (link_to_file or save_with_document):
+        if not link_to_file and not save_with_document:
             raise Exception(
                 "Arguments link_to_file and save_with_document cannot both be false"
             )
@@ -4426,8 +4382,8 @@ class Pictures(Collection):
                 filename,
                 link_to_file,
                 save_with_document,
-                left if left else None,
-                top if top else None,
+                left or None,
+                top or None,
                 width=im_width,
                 height=im_height,
                 anchor=anchor,
@@ -4528,10 +4484,7 @@ class Names:
         return Name(impl=self.impl.add(name, refers_to))
 
     def __getitem__(self, item):
-        if isinstance(item, numbers.Number):
-            return self(item + 1)
-        else:
-            return self(item)
+        return self(item + 1) if isinstance(item, numbers.Number) else self(item)
 
     def __setitem__(self, key, value):
         if isinstance(value, Range):
@@ -4638,7 +4591,7 @@ class Name:
         return Range(impl=self.impl.refers_to_range)
 
     def __repr__(self):
-        return "<Name '%s': %s>" % (self.name, self.refers_to)
+        return f"<Name '{self.name}': {self.refers_to}>"
 
     def __eq__(self, other):
         return (
@@ -4748,13 +4701,13 @@ def load(index=1, header=1, chunksize=5000):
     selection = books.active.selection
     if selection.shape == (1, 1):
         selection = selection.current_region
-    if pd:
-        values = selection.options(
+    return (
+        selection.options(
             pd.DataFrame, index=index, header=header, chunksize=chunksize
         ).value
-    else:
-        values = selection.options(chunksize=chunksize).value
-    return values
+        if pd
+        else selection.options(chunksize=chunksize).value
+    )
 
 
 class Macro:
@@ -4833,7 +4786,7 @@ class Characters:
             and (item.start == item.stop)
         ):
             raise ValueError(
-                self.__class__.__name__ + " object does not support empty slices"
+                f"{self.__class__.__name__} object does not support empty slices"
             )
         if isinstance(item, slice) and item.step is not None:
             raise ValueError(
@@ -5028,7 +4981,7 @@ class Books(Collection):
 
         fullname = utils.fspath(fullname)
         if not os.path.exists(fullname):
-            raise FileNotFoundError("No such file: '%s'" % fullname)
+            raise FileNotFoundError(f"No such file: '{fullname}'")
         fullname = os.path.realpath(fullname)
         _, name = os.path.split(fullname)
 
@@ -5114,9 +5067,8 @@ class Sheets(Collection):
             Added sheet object
 
         """
-        if name is not None:
-            if name.lower() in (s.name.lower() for s in self):
-                raise ValueError("Sheet named '%s' already present in workbook" % name)
+        if name is not None and name.lower() in (s.name.lower() for s in self):
+            raise ValueError(f"Sheet named '{name}' already present in workbook")
         if before is not None and not isinstance(before, Sheet):
             before = self(before)
         if after is not None and not isinstance(after, Sheet):

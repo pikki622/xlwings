@@ -51,10 +51,9 @@ class LicenseHandler:
     def get_license():
         # Sheet config (only used by RunPython, UDFs use env var)
         try:
-            sheet_license_key = read_config_sheet(xlwings.Book.caller()).get(
+            if sheet_license_key := read_config_sheet(xlwings.Book.caller()).get(
                 "LICENSE_KEY"
-            )
-            if sheet_license_key:
+            ):
                 return sheet_license_key
         except:  # noqa: E722
             pass
@@ -102,13 +101,12 @@ class LicenseHandler:
             ).hexdigest()
             if signature[:5] != key[-5:]:
                 raise xlwings.LicenseError("Invalid xlwings license key.") from None
-            else:
-                try:
-                    license_info = json.loads(
-                        base64.urlsafe_b64decode(key[:-5]).decode()
-                    )
-                except:  # noqa: E722
-                    raise xlwings.LicenseError("Invalid xlwings license key.") from None
+            try:
+                license_info = json.loads(
+                    base64.urlsafe_b64decode(key[:-5]).decode()
+                )
+            except:  # noqa: E722
+                raise xlwings.LicenseError("Invalid xlwings license key.") from None
         try:
             if (
                 license_type == "developer"
@@ -131,9 +129,7 @@ class LicenseHandler:
         ).date()
         if dt.date.today() > license_valid_until:
             raise xlwings.LicenseError(
-                "Your xlwings license expired on {}.".format(
-                    license_valid_until.strftime("%Y-%m-%d")
-                )
+                f'Your xlwings license expired on {license_valid_until.strftime("%Y-%m-%d")}.'
             ) from None
         if product not in license_info["products"]:
             raise xlwings.LicenseError(
@@ -187,7 +183,7 @@ def get_embedded_code_temp_dir():
     try:
         # HACK: Clean up directories that are older than 30 days
         # This should be done in the C++ part when the Python process is killed
-        for subdir in glob.glob(tmp_base_path + "/*/"):
+        for subdir in glob.glob(f"{tmp_base_path}/*/"):
             if os.path.getmtime(subdir) < time.time() - 30 * 86400:
                 shutil.rmtree(subdir, ignore_errors=True)
     except Exception:

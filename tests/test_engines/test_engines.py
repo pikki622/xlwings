@@ -383,9 +383,7 @@ def test_pictures_add_and_delete(book):
 @pytest.mark.skipif(engine == "calamine", reason="calamine engine")
 def test_pictures_iter(book):
     sheet = book.sheets[0]
-    pic_names = []
-    for pic in sheet.pictures:
-        pic_names.append(pic.name)
+    pic_names = [pic.name for pic in sheet.pictures]
     assert pic_names == ["mypic1", "mypic2"]
 
 

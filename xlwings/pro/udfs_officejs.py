@@ -84,10 +84,7 @@ def xlfunc(f=None, **kwargs):
         f.__xlfunc__["namespace"] = kwargs.get("namespace")
         return f
 
-    if f is None:
-        return inner
-    else:
-        return inner(f)
+    return inner if f is None else inner(f)
 
 
 def xlret(convert=None, **kwargs):
@@ -160,11 +157,7 @@ async def custom_functions_call(data, module):
             args[i] = conversion.read(
                 None, arg, arg_info["options"], engine_name="officejs"
             )
-    if inspect.iscoroutinefunction(func):
-        ret = await func(*args)
-    else:
-        ret = func(*args)
-
+    ret = await func(*args) if inspect.iscoroutinefunction(func) else func(*args)
     if "date_format" not in ret_info["options"]:
         ret_info["options"]["date_format"] = locale_to_shortdate[
             data["content_language"].lower()
@@ -266,9 +259,7 @@ def custom_functions_meta(module):
     for name, obj in inspect.getmembers(module):
         if hasattr(obj, "__xlfunc__"):
             xlfunc = obj.__xlfunc__
-            func = {}
-            func["description"] = xlfunc["ret"]["doc"]
-            func["id"] = xlfunc["name"].upper()
+            func = {"description": xlfunc["ret"]["doc"], "id": xlfunc["name"].upper()}
             if xlfunc["namespace"]:
                 func["name"] = f"{xlfunc['namespace'].upper()}.{xlfunc['name'].upper()}"
             else:
@@ -283,11 +274,12 @@ def custom_functions_meta(module):
 
             params = []
             for arg in xlfunc["args"]:
-                param = {}
-                param["description"] = arg["doc"]
-                param["name"] = arg["name"]
-                param["dimensionality"] = "matrix"
-                param["type"] = "any"
+                param = {
+                    "description": arg["doc"],
+                    "name": arg["name"],
+                    "dimensionality": "matrix",
+                    "type": "any",
+                }
                 if "optional" in arg:
                     param["optional"] = True
                 elif arg["vararg"]:

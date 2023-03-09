@@ -2,6 +2,7 @@
 Windows builds currently rely on setup.py instead of pyproject.toml/maturin as long
 as the dlls are distributed as data_files
 """
+
 import glob
 import os
 import re
@@ -15,7 +16,7 @@ with open(os.path.join(os.path.dirname(__file__), "README.rst")) as f:
 
 # Version Number
 with open(os.path.join(os.path.dirname(__file__), "xlwings", "__init__.py")) as f:
-    version = re.compile(r'.*__version__ = "(.*?)"', re.S).match(f.read()).group(1)
+    version = re.compile(r'.*__version__ = "(.*?)"', re.S).match(f.read())[1]
 
 # Dependencies
 data_files = []
@@ -37,9 +38,6 @@ elif sys.platform.startswith("win"):
     # This places dlls next to python.exe for standard setup
     # and in the parent folder for virtualenv
     data_files += [("", glob.glob("xlwings??-*.dll"))]
-else:
-    pass
-
 extras_require = {
     "reports": ["Jinja2", "pdfrw"],
     "all": [

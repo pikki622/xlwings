@@ -84,10 +84,7 @@ def _auth_aad(
     )
 
     result = None
-    # Username selects the account if multiple accounts are logged in
-    # This requires scopes to be set though, but scopes=[""] seem to do the trick.
-    accounts = app.get_accounts(username=username if username else None)
-    if accounts:
+    if accounts := app.get_accounts(username=username or None):
         account = accounts[0]
         result = app.acquire_token_silent(scopes=scopes, account=account)
     if not result:
@@ -117,29 +114,26 @@ def get_addin_dir(global_location=False):
     # The call to startup_path creates the XLSTART folder if it doesn't exist yet
     # The global XLSTART folder seems to be always existing
     if xw.apps:
-        if global_location:
-            addin_dir = Path(xw.apps.active.path) / "XLSTART"
-            addin_dir.mkdir(exist_ok=True)
-            return addin_dir
-        else:
+        if not global_location:
             return xw.apps.active.startup_path
+        addin_dir = Path(xw.apps.active.path) / "XLSTART"
+        addin_dir.mkdir(exist_ok=True)
+        return addin_dir
     else:
         with xw.App(visible=False) as app:
-            if global_location:
-                addin_dir = Path(app.path) / "XLSTART"
-                addin_dir.mkdir(exist_ok=True)
-                return addin_dir
-            else:
+            if not global_location:
                 return app.startup_path
+            addin_dir = Path(app.path) / "XLSTART"
+            addin_dir.mkdir(exist_ok=True)
+            return addin_dir
 
 
 def _handle_addin_glob_arg(args):
-    if args.glob:
-        if not sys.platform.startswith("win"):
-            sys.exit("Error: The '--glob' option is only supported on Windows.")
-        return True
-    else:
+    if not args.glob:
         return False
+    if not sys.platform.startswith("win"):
+        sys.exit("Error: The '--glob' option is only supported on Windows.")
+    return True
 
 
 def addin_install(args):
@@ -255,17 +249,14 @@ def _addin_remove(addin_name, global_install):
 
 def addin_status(args):
     global_install = _handle_addin_glob_arg(args)
-    if args.file:
-        addin_name = os.path.basename(args.file)
-    else:
-        addin_name = "xlwings.xlam"
+    addin_name = os.path.basename(args.file) if args.file else "xlwings.xlam"
     addin_path = os.path.join(get_addin_dir(global_install), addin_name)
     if os.path.isfile(addin_path):
-        print("The add-in is installed at {}".format(addin_path))
+        print(f"The add-in is installed at {addin_path}")
         print('Use "xlwings addin remove" to uninstall it.')
     else:
         print("The add-in is not installed.")
-        print('"xlwings addin install" will install it at: {}'.format(addin_path))
+        print(f'"xlwings addin install" will install it at: {addin_path}')
 
 
 def quickstart(args):
@@ -289,15 +280,14 @@ def quickstart(args):
             Path(cwd) / project_name,
             ignore=shutil.ignore_patterns("__pycache__"),
         )
-    else:
-        if not os.path.exists(project_path):
-            os.makedirs(project_path)
-        else:
-            sys.exit("Error: Directory already exists.")
+    elif os.path.exists(project_path):
+        sys.exit("Error: Directory already exists.")
 
+    else:
+        os.makedirs(project_path)
     # Python file
     if not args.fastapi:
-        with open(os.path.join(project_path, project_name + ".py"), "w") as f:
+        with open(os.path.join(project_path, f"{project_name}.py"), "w") as f:
             f.write("import xlwings as xw\n\n\n")
             f.write("def main():\n")
             f.write("    wb = xw.Book.caller()\n")
@@ -384,19 +374,17 @@ def update_user_config(key, value=None, action="add"):
     if os.path.exists(xw.USER_CONFIG_FILE):
         with open(xw.USER_CONFIG_FILE, "r") as f:
             config = f.readlines()
-        for line in config:
-            # Remove existing key and empty lines
-            if line.split(",")[0] == f'"{key}"' or line in ("\r\n", "\n"):
-                pass
-            else:
-                new_config.append(line)
+        new_config.extend(
+            line
+            for line in config
+            if line.split(",")[0] != f'"{key}"' and line not in ("\r\n", "\n")
+        )
         if action == "add":
             new_config.append(f'"{key}","{value}"\n')
+    elif action == "add":
+        new_config = [f'"{key}","{value}"\n']
     else:
-        if action == "add":
-            new_config = [f'"{key}","{value}"\n']
-        else:
-            return
+        return
     if not os.path.exists(os.path.dirname(xw.USER_CONFIG_FILE)):
         os.makedirs(os.path.dirname(xw.USER_CONFIG_FILE))
     with open(xw.USER_CONFIG_FILE, "w") as f:
@@ -423,19 +411,17 @@ def get_conda_settings():
 
 
 def config_create(args):
-    if args is None:
-        force = False
-    else:
-        force = args.force
+    force = False if args is None else args.force
     os.makedirs(os.path.dirname(xw.USER_CONFIG_FILE), exist_ok=True)
     settings = []
     conda_path, conda_env = get_conda_settings()
     if conda_path and sys.platform.startswith("win"):
-        settings.append('"CONDA PATH","{}"\n'.format(conda_path))
-        settings.append('"CONDA ENV","{}"\n'.format(conda_env))
+        settings.extend(
+            (f'"CONDA PATH","{conda_path}"\n', f'"CONDA ENV","{conda_env}"\n')
+        )
     else:
         extension = "MAC" if sys.platform.startswith("darwin") else "WIN"
-        settings.append('"INTERPRETER_{}","{}"\n'.format(extension, sys.executable))
+        settings.append(f'"INTERPRETER_{extension}","{sys.executable}"\n')
     if not os.path.exists(xw.USER_CONFIG_FILE) or force:
         with open(xw.USER_CONFIG_FILE, "w") as f:
             f.writelines(settings)
@@ -467,7 +453,7 @@ def code_embed(args):
         sheetname_to_path = {}
         for source_file in source_files:
             if not single_file:
-                sheetname = uuid.uuid4().hex[:28] + ".py"
+                sheetname = f"{uuid.uuid4().hex[:28]}.py"
                 sheetname_to_path[sheetname] = str(
                     source_file.relative_to(Path(wb.fullname).parent)
                 )
@@ -478,7 +464,7 @@ def code_embed(args):
                     line = line.replace("'''", '"""')
                     # Duplicate leading single quotes so Excel interprets them properly
                     # This is required even if the cell is in Text format
-                    content.append(["'" + line if line.startswith("'") else line])
+                    content.append([f"'{line}" if line.startswith("'") else line])
             if single_file and source_file.name not in wb.sheet_names:
                 sheet = wb.sheets.add(
                     source_file.name, after=wb.sheets[len(wb.sheets) - 1]
@@ -783,18 +769,20 @@ def export_vba_modules(book, overwrite=False):
         )
         path_to_type[str(file_path)] = vb_component.Type
         if (
-            vb_component.Type == 100 and vb_component.CodeModule.CountOfLines > 0
-        ) or vb_component.Type != 100:
-            # Prevents cluttering everything with empty files if you have lots of sheets
-            if overwrite or not file_path.exists():
-                vb_component.Export(str(file_path))
-                if vb_component.Type == 100:
-                    # Remove the meta info so it can be distinguished from regular
-                    # classes when running "xlwings vba import"
-                    with open(file_path, "r") as f:
-                        exported_code = f.readlines()
-                    with open(file_path, "w") as f:
-                        f.writelines(exported_code[9:])
+            (
+                vb_component.Type == 100
+                and vb_component.CodeModule.CountOfLines > 0
+            )
+            or vb_component.Type != 100
+        ) and (overwrite or not file_path.exists()):
+            vb_component.Export(str(file_path))
+            if vb_component.Type == 100:
+                # Remove the meta info so it can be distinguished from regular
+                # classes when running "xlwings vba import"
+                with open(file_path, "r") as f:
+                    exported_code = f.readlines()
+                with open(file_path, "w") as f:
+                    f.writelines(exported_code[9:])
     return path_to_type
 
 
@@ -805,14 +793,13 @@ def vba_get_book(args):
 
     if args and args.file:
         book = xw.Book(args.file)
-    else:
-        if not xw.apps:
-            sys.exit(
-                "Your workbook must be open or you have to supply the --file argument."
-            )
-        else:
-            book = xw.books.active
+    elif xw.apps:
+        book = xw.books.active
 
+    else:
+        sys.exit(
+            "Your workbook must be open or you have to supply the --file argument."
+        )
     tf = query_yes_no(
         textwrap.dedent(
             f"""
@@ -937,7 +924,7 @@ def vba_edit(args):
 
 
 def main():
-    print("xlwings version: " + xw.__version__)
+    print(f"xlwings version: {xw.__version__}")
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
     subparsers.required = True

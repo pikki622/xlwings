@@ -55,13 +55,14 @@ def errorstr_to_errortype(error, runtime):
         "#VALUE!": "Value",
     }
     error_type = error_to_type.get(error)
-    if not error_type:
-        return error
-    else:
-        return {
+    return (
+        {
             "type": "Error",
             "errorType": error_type,
         }
+        if error_type
+        else error
+    )
 
 
 def _clean_value_data_element(
@@ -77,10 +78,7 @@ def _clean_value_data_element(
     elif isinstance(value, dict):
         # https://learn.microsoft.com/en-us/office/dev/add-ins/excel/custom-functions-data-types-concepts
         if value["type"] == "Error":
-            if err_to_str:
-                return value["basicValue"]
-            else:
-                return None
+            return value["basicValue"] if err_to_str else None
         else:
             value = value["basicValue"]  # e.g., datetime (only via data types)
     elif number_builder is not None and type(value) == float:
