@@ -150,17 +150,16 @@ class Books(base_classes.Books):
     def open(self, filename):
         filename = str(Path(filename).resolve())
         sheet_names = xlwingslib.get_sheet_names(filename)
-        names = []
-        for name, ref in xlwingslib.get_defined_names(filename):
-            if ref.split("!")[0].strip("'") in sheet_names:
-                names.append(
-                    {
-                        "name": name,
-                        "sheet_index": sheet_names.index(ref.split("!")[0].strip("'")),
-                        "address": ref.split("!")[1],
-                        "book_scope": True,  # TODO: not provided by calamine
-                    }
-                )
+        names = [
+            {
+                "name": name,
+                "sheet_index": sheet_names.index(ref.split("!")[0].strip("'")),
+                "address": ref.split("!")[1],
+                "book_scope": True,  # TODO: not provided by calamine
+            }
+            for name, ref in xlwingslib.get_defined_names(filename)
+            if ref.split("!")[0].strip("'") in sheet_names
+        ]
         book = Book(
             api={
                 "sheet_names": sheet_names,
@@ -180,26 +179,28 @@ class Books(base_classes.Books):
         return book
 
     def _try_find_book_by_name(self, name):
-        for book in self.books:
-            if book.name == name or book.fullname == name:
-                return book
-        return None
+        return next(
+            (
+                book
+                for book in self.books
+                if book.name == name or book.fullname == name
+            ),
+            None,
+        )
 
     def __len__(self):
         return len(self.books)
 
     def __iter__(self):
-        for book in self.books:
-            yield book
+        yield from self.books
 
     def __call__(self, name_or_index):
         if isinstance(name_or_index, numbers.Number):
             return self.books[name_or_index - 1]
-        else:
-            book = self._try_find_book_by_name(name_or_index)
-            if book is None:
-                raise KeyError(name_or_index)
-            return book
+        book = self._try_find_book_by_name(name_or_index)
+        if book is None:
+            raise KeyError(name_or_index)
+        return book
 
 
 class Book(base_classes.Book):
@@ -329,10 +330,10 @@ class Range(base_classes.Range):
                         and api_name["sheet_index"] == sheet.index - 1
                     ):
                         tuple1, tuple2 = utils.a1_to_tuples(api_name["address"])
-                if not tuple1:
-                    raise NoSuchObjectError(
-                        f"The address/named range '{arg1}' doesn't exist."
-                    )
+            if not tuple1:
+                raise NoSuchObjectError(
+                    f"The address/named range '{arg1}' doesn't exist."
+                )
             arg1, arg2 = tuple1, tuple2
 
         # Coordinates
@@ -373,15 +374,7 @@ class Range(base_classes.Range):
         err_to_str = self.options.get("err_to_str", False)
         if self.arg2 is None:
             self.arg2 = self.arg1
-        if self.arg2[0] == MAX_ROWS and self.arg2[1] == MAX_COLUMNS:
-            # Whole sheet via sheet.cells
-            if not self.sheet.api.get(f"values_err_to_str_{err_to_str}"):
-                values = xlwingslib.get_sheet_values(
-                    self.book.fullname, self.sheet.index - 1, err_to_str
-                )
-                self.sheet._api[f"values_err_to_str_{err_to_str}"] = values
-                return values
-        else:
+        if self.arg2[0] != MAX_ROWS or self.arg2[1] != MAX_COLUMNS:
             # Specific range
             return xlwingslib.get_range_values(
                 self.book.fullname,
@@ -390,6 +383,13 @@ class Range(base_classes.Range):
                 (self.arg2[0] - 1, self.arg2[1] - 1),
                 err_to_str,
             )
+        # Whole sheet via sheet.cells
+        if not self.sheet.api.get(f"values_err_to_str_{err_to_str}"):
+            values = xlwingslib.get_sheet_values(
+                self.book.fullname, self.sheet.index - 1, err_to_str
+            )
+            self.sheet._api[f"values_err_to_str_{err_to_str}"] = values
+            return values
 
     @property
     def address(self):
@@ -468,16 +468,15 @@ class Range(base_classes.Range):
         return nrows * ncols
 
     def __call__(self, arg1, arg2=None):
-        if arg2 is None:
-            col = (arg1 - 1) % self.shape[1]
-            row = int((arg1 - 1 - col) / self.shape[1])
-            return self(row + 1, col + 1)
-        else:
+        if arg2 is not None:
             return Range(
                 sheet=self.sheet,
                 book=self.book,
                 arg1=(self.row + arg1 - 1, self.column + arg2 - 1),
             )
+        col = (arg1 - 1) % self.shape[1]
+        row = int((arg1 - 1 - col) / self.shape[1])
+        return self(row + 1, col + 1)
 
 
 class Name(base_classes.Name):
@@ -524,10 +523,7 @@ class Names(base_classes.Names):
         if isinstance(name_or_index, numbers.Number):
             return 1 <= name_or_index <= len(self)
         else:
-            for i in self.api:
-                if i["name"] == name_or_index:
-                    return True
-            return False
+            return any(i["name"] == name_or_index for i in self.api)
 
     def __len__(self):
         return len(self.api)

@@ -76,10 +76,7 @@ def fontcolor(value=None, filter_list=None):
         # If called from a single cell/shape placeholder
         color = _get_filter_value(filter_list, "fontcolor")
         colors = {"white": "#ffffff", "black": "#000000"}
-        if color.lower() in colors:
-            return colors[color.lower()]
-        else:
-            return color
+        return colors.get(color.lower(), color)
 
 
 # DataFrame filters
@@ -174,15 +171,11 @@ def aggsmall(df, filter_args):
 
 
 def head(df, filter_args):
-    if df.empty:
-        return df
-    return df.head(filter_args[0].as_const())
+    return df if df.empty else df.head(filter_args[0].as_const())
 
 
 def tail(df, filter_args):
-    if df.empty:
-        return df
-    return df.tail(filter_args[0].as_const())
+    return df if df.empty else df.tail(filter_args[0].as_const())
 
 
 def rowslice(df, filter_args):
@@ -236,12 +229,11 @@ def vmerge(df, filter_args, top_left_cell, header):
     """
     if df.empty:
         return []
-    if not filter_args:
-        # Default merges hierarchically over all columns
-        cols = list(range(len(df.columns)))
-    else:
-        cols = [arg.as_const() for arg in filter_args]
-
+    cols = (
+        [arg.as_const() for arg in filter_args]
+        if filter_args
+        else list(range(len(df.columns)))
+    )
     merged_cells_count_all = []
     for ix, col in enumerate(cols):
         if ix == 0:

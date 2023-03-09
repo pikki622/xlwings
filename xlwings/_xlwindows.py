@@ -115,18 +115,18 @@ class COMRetryMethodWrapper:
                     return v
             except pywintypes.com_error as e:
                 if (
-                    not N_COM_ATTEMPTS or n_attempt < N_COM_ATTEMPTS
-                ) and e.hresult == -2147418111:
-                    n_attempt += 1
-                    continue
-                else:
+                    N_COM_ATTEMPTS
+                    and n_attempt >= N_COM_ATTEMPTS
+                    or e.hresult != -2147418111
+                ):
                     raise
+                n_attempt += 1
+                continue
             except AttributeError:
-                if not N_COM_ATTEMPTS or n_attempt < N_COM_ATTEMPTS:
-                    n_attempt += 1
-                    continue
-                else:
+                if N_COM_ATTEMPTS and n_attempt >= N_COM_ATTEMPTS:
                     raise
+                n_attempt += 1
+                continue
 
 
 class ExcelBusyError(Exception):
@@ -148,36 +148,28 @@ class COMRetryObjectWrapper:
                 return setattr(self._inner, key, value)
             except pywintypes.com_error as e:
                 hresult, msg, exc, arg = e.args
-                if exc:
-                    wcode, source, text, help_file, help_id, scode = exc
-                else:
-                    wcode, source, text, help_file, help_id, scode = (  # noqa: F841
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                # -2147352567 is the error you get when clicking into cells. If we
-                # wouldn't check for scode, actions like renaming a sheet with >31
-                # characters would be tried forever, causing xlwings to hang (they
-                # also have hresult -2147352567).
+                wcode, source, text, help_file, help_id, scode = exc or (
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
                 if (
-                    (not N_COM_ATTEMPTS or n_attempt < N_COM_ATTEMPTS)
-                    and e.hresult in [-2147418111, -2147352567]
-                    and scode in [None, -2146777998]
+                    N_COM_ATTEMPTS
+                    and n_attempt >= N_COM_ATTEMPTS
+                    or e.hresult not in [-2147418111, -2147352567]
+                    or scode not in [None, -2146777998]
                 ):
-                    n_attempt += 1
-                    continue
-                else:
                     raise
+                n_attempt += 1
+                continue
             except AttributeError:
-                if not N_COM_ATTEMPTS or n_attempt < N_COM_ATTEMPTS:
-                    n_attempt += 1
-                    continue
-                else:
+                if N_COM_ATTEMPTS and n_attempt >= N_COM_ATTEMPTS:
                     raise
+                n_attempt += 1
+                continue
 
     def __getattr__(self, item):
         n_attempt = 1
@@ -192,12 +184,13 @@ class COMRetryObjectWrapper:
                     return v
             except pywintypes.com_error as e:
                 if (
-                    not N_COM_ATTEMPTS or n_attempt < N_COM_ATTEMPTS
-                ) and e.hresult == -2147418111:
-                    n_attempt += 1
-                    continue
-                else:
+                    N_COM_ATTEMPTS
+                    and n_attempt >= N_COM_ATTEMPTS
+                    or e.hresult != -2147418111
+                ):
                     raise
+                n_attempt += 1
+                continue
             except AttributeError:
                 # pywin32 reacts incorrectly to RPC_E_CALL_REJECTED (i.e. assumes
                 # attribute doesn't exist, thus not allowing to distinguish between
@@ -210,15 +203,14 @@ class COMRetryObjectWrapper:
                     if e.hresult != -2147418111:  # RPC_E_CALL_REJECTED
                         # attribute probably really doesn't exist
                         raise
-                if not N_COM_ATTEMPTS or n_attempt < N_COM_ATTEMPTS:
-                    n_attempt += 1
-                    continue
-                else:
+                if N_COM_ATTEMPTS and n_attempt >= N_COM_ATTEMPTS:
                     raise ExcelBusyError()
+                n_attempt += 1
+                continue
 
     def __call__(self, *args, **kwargs):
         n_attempt = 1
-        for i in range(N_COM_ATTEMPTS + 1):
+        for _ in range(N_COM_ATTEMPTS + 1):
             try:
                 v = self._inner(*args, **kwargs)
                 if isinstance(v, (CDispatch, CoClassBaseClass, DispatchBaseClass)):
@@ -229,16 +221,16 @@ class COMRetryObjectWrapper:
                     return v
             except pywintypes.com_error as e:
                 if (
-                    not N_COM_ATTEMPTS or n_attempt < N_COM_ATTEMPTS
-                ) and e.hresult == -2147418111:
-                    n_attempt += 1
-                    continue
-                else:
+                    N_COM_ATTEMPTS
+                    and n_attempt >= N_COM_ATTEMPTS
+                    or e.hresult != -2147418111
+                ):
                     raise
+                n_attempt += 1
+                continue
             except AttributeError:
                 if not N_COM_ATTEMPTS or n_attempt < N_COM_ATTEMPTS:
                     n_attempt += 1
-                    continue
                 else:
                     raise
 
@@ -386,9 +378,8 @@ def _datetime_to_com_time(dt_time):
     # Convert date to datetime
     if pd and isinstance(dt_time, type(pd.NaT)):
         return ""
-    if np:
-        if type(dt_time) is np.datetime64:
-            dt_time = np_datetime_to_datetime(dt_time)
+    if np and type(dt_time) is np.datetime64:
+        dt_time = np_datetime_to_datetime(dt_time)
 
     if type(dt_time) is dt.date:
         dt_time = dt.datetime(
@@ -435,10 +426,7 @@ def _clean_value_data_element(
     elif number_builder is not None and type(value) == float:
         value = number_builder(value)
     elif isinstance(value, int) and value in cell_errors:
-        if err_to_str:
-            return cell_errors[value]
-        else:
-            return None
+        return cell_errors[value] if err_to_str else None
     return value
 
 
@@ -488,10 +476,7 @@ engine = Engine()
 
 class Apps:
     def keys(self):
-        k = []
-        for hwnd in get_excel_hwnds():
-            k.append(App(xl=hwnd).pid)
-        return k
+        return [App(xl=hwnd).pid for hwnd in get_excel_hwnds()]
 
     def add(self, spec=None, add_book=None, xl=None, visible=None):
         return App(spec=spec, add_book=add_book, xl=xl, visible=visible)
@@ -832,7 +817,7 @@ class Book:
             )
         elif (saved_path == "") and (path is None):
             # Previously unsaved: Save under current name in current working directory
-            path = os.path.join(os.getcwd(), self.xl.Name + ".xlsx")
+            path = os.path.join(os.getcwd(), f"{self.xl.Name}.xlsx")
             alerts_state = self.xl.Application.DisplayAlerts
             self.xl.Application.DisplayAlerts = False
             self.xl.SaveAs(
@@ -850,16 +835,15 @@ class Book:
 
     @property
     def fullname(self):
-        if "://" in self.xl.FullName:
-            config = read_config_sheet(xlwings.Book(impl=self))
-            return fullname_url_to_local_path(
-                url=self.xl.FullName,
-                sheet_onedrive_consumer_config=config.get("ONEDRIVE_CONSUMER_WIN"),
-                sheet_onedrive_commercial_config=config.get("ONEDRIVE_COMMERCIAL_WIN"),
-                sheet_sharepoint_config=config.get("SHAREPOINT_WIN"),
-            )
-        else:
+        if "://" not in self.xl.FullName:
             return self.xl.FullName
+        config = read_config_sheet(xlwings.Book(impl=self))
+        return fullname_url_to_local_path(
+            url=self.xl.FullName,
+            sheet_onedrive_consumer_config=config.get("ONEDRIVE_CONSUMER_WIN"),
+            sheet_onedrive_commercial_config=config.get("ONEDRIVE_COMMERCIAL_WIN"),
+            sheet_sharepoint_config=config.get("SHAREPOINT_WIN"),
+        )
 
     @property
     def names(self):
@@ -904,9 +888,6 @@ class Sheets:
     def add(self, before=None, after=None, name=None):
         if before:
             sheet = Sheet(xl=self.xl.Add(Before=before.xl))
-            if name is not None:
-                sheet.name = name
-            return sheet
         elif after:
             # Hack, since "After" is broken in certain environments
             # see: http://code.activestate.com/lists/python-win32/11554/
@@ -919,14 +900,12 @@ class Sheets:
             else:
                 xl_sheet = self.xl.Add(Before=self.xl(after.xl.Index + 1))
             sheet = Sheet(xl=xl_sheet)
-            if name is not None:
-                sheet.name = name
-            return sheet
         else:
             sheet = Sheet(xl=self.xl.Add())
-            if name is not None:
-                sheet.name = name
-            return sheet
+
+        if name is not None:
+            sheet.name = name
+        return sheet
 
 
 class Sheet:
@@ -1013,9 +992,9 @@ class Sheet:
         self.xl.Cells.Clear()
 
     def autofit(self, axis=None):
-        if axis == "rows" or axis == "r":
+        if axis in ["rows", "r"]:
             self.xl.Rows.AutoFit()
-        elif axis == "columns" or axis == "c":
+        elif axis in ["columns", "c"]:
             self.xl.Columns.AutoFit()
         elif axis is None:
             self.xl.Rows.AutoFit()
@@ -1150,10 +1129,7 @@ class Range:
 
     @property
     def raw_value(self):
-        if self.xl is not None:
-            return self.xl.Value
-        else:
-            return None
+        return self.xl.Value if self.xl is not None else None
 
     @raw_value.setter
     def raw_value(self, data):
@@ -1173,10 +1149,7 @@ class Range:
 
     @property
     def formula(self):
-        if self.xl is not None:
-            return self.xl.Formula
-        else:
-            return None
+        return self.xl.Formula if self.xl is not None else None
 
     @formula.setter
     def formula(self, value):
@@ -1185,10 +1158,7 @@ class Range:
 
     @property
     def formula2(self):
-        if self.xl is not None:
-            return self.xl.Formula2
-        else:
-            return None
+        return self.xl.Formula2 if self.xl is not None else None
 
     @formula2.setter
     def formula2(self, value):
@@ -1201,10 +1171,7 @@ class Range:
 
     @property
     def formula_array(self):
-        if self.xl is not None:
-            return self.xl.FormulaArray
-        else:
-            return None
+        return self.xl.FormulaArray if self.xl is not None else None
 
     @formula_array.setter
     def formula_array(self, value):
@@ -1217,10 +1184,7 @@ class Range:
 
     @property
     def column_width(self):
-        if self.xl is not None:
-            return self.xl.ColumnWidth
-        else:
-            return 0
+        return self.xl.ColumnWidth if self.xl is not None else 0
 
     @column_width.setter
     def column_width(self, value):
@@ -1229,10 +1193,7 @@ class Range:
 
     @property
     def row_height(self):
-        if self.xl is not None:
-            return self.xl.RowHeight
-        else:
-            return 0
+        return self.xl.RowHeight if self.xl is not None else 0
 
     @row_height.setter
     def row_height(self, value):
@@ -1241,38 +1202,23 @@ class Range:
 
     @property
     def width(self):
-        if self.xl is not None:
-            return self.xl.Width
-        else:
-            return 0
+        return self.xl.Width if self.xl is not None else 0
 
     @property
     def height(self):
-        if self.xl is not None:
-            return self.xl.Height
-        else:
-            return 0
+        return self.xl.Height if self.xl is not None else 0
 
     @property
     def left(self):
-        if self.xl is not None:
-            return self.xl.Left
-        else:
-            return 0
+        return self.xl.Left if self.xl is not None else 0
 
     @property
     def top(self):
-        if self.xl is not None:
-            return self.xl.Top
-        else:
-            return 0
+        return self.xl.Top if self.xl is not None else 0
 
     @property
     def number_format(self):
-        if self.xl is not None:
-            return self.xl.NumberFormat
-        else:
-            return ""
+        return self.xl.NumberFormat if self.xl is not None else ""
 
     @number_format.setter
     def number_format(self, value):
@@ -1289,22 +1235,18 @@ class Range:
     def address(self):
         if self.xl is not None:
             return self.xl.Address
-        else:
-            _, row, col, nrows, ncols = self.coords
-            return "$%s$%s{%sx%s}" % (col_name(col), str(row), nrows, ncols)
+        _, row, col, nrows, ncols = self.coords
+        return "$%s$%s{%sx%s}" % (col_name(col), str(row), nrows, ncols)
 
     @property
     def current_region(self):
-        if self.xl is not None:
-            return Range(xl=self.xl.CurrentRegion)
-        else:
-            return self
+        return Range(xl=self.xl.CurrentRegion) if self.xl is not None else self
 
     def autofit(self, axis=None):
         if self.xl is not None:
-            if axis == "rows" or axis == "r":
+            if axis in ["rows", "r"]:
                 self.xl.Rows.AutoFit()
-            elif axis == "columns" or axis == "c":
+            elif axis in ["columns", "c"]:
                 self.xl.Columns.AutoFit()
             elif axis is None:
                 self.xl.Columns.AutoFit()
@@ -1367,13 +1309,12 @@ class Range:
 
     @property
     def hyperlink(self):
-        if self.xl is not None:
-            try:
-                return self.xl.Hyperlinks(1).Address
-            except pywintypes.com_error:
-                raise Exception("The cell doesn't seem to contain a hyperlink!")
-        else:
+        if self.xl is None:
             return ""
+        try:
+            return self.xl.Hyperlinks(1).Address
+        except pywintypes.com_error:
+            raise Exception("The cell doesn't seem to contain a hyperlink!")
 
     def add_hyperlink(self, address, text_to_display, screen_tip):
         if self.xl is not None:
@@ -1386,13 +1327,12 @@ class Range:
 
     @property
     def color(self):
-        if self.xl is not None:
-            if self.xl.Interior.ColorIndex == ColorIndex.xlColorIndexNone:
-                return None
-            else:
-                return int_to_rgb(self.xl.Interior.Color)
-        else:
+        if self.xl is None:
             return None
+        if self.xl.Interior.ColorIndex == ColorIndex.xlColorIndexNone:
+            return None
+        else:
+            return int_to_rgb(self.xl.Interior.Color)
 
     @color.setter
     def color(self, color_or_rgb):
@@ -1408,23 +1348,21 @@ class Range:
 
     @property
     def name(self):
-        if self.xl is not None:
-            try:
-                name = Name(xl=self.xl.Name)
-            except pywintypes.com_error:
-                name = None
-            return name
-        else:
+        if self.xl is None:
             return None
+        try:
+            name = Name(xl=self.xl.Name)
+        except pywintypes.com_error:
+            name = None
+        return name
 
     @property
     def has_array(self):
-        if self.xl is not None:
-            try:
-                return self.xl.HasArray
-            except pywintypes.com_error:
-                return False
-        else:
+        if self.xl is None:
+            return False
+        try:
+            return self.xl.HasArray
+        except pywintypes.com_error:
             return False
 
     @name.setter
@@ -1433,12 +1371,11 @@ class Range:
             self.xl.Name = value
 
     def __call__(self, *args):
-        if self.xl is not None:
-            if len(args) == 0:
-                raise ValueError("Invalid arguments")
-            return Range(xl=self.xl(*args))
-        else:
+        if self.xl is None:
             raise NotImplementedError()
+        if not args:
+            raise ValueError("Invalid arguments")
+        return Range(xl=self.xl(*args))
 
     @property
     def rows(self):
@@ -1646,15 +1583,15 @@ class Font:
         if isinstance(self.parent, Range):
             return self.xl.Bold
         elif isinstance(self.parent, Shape):
-            return True if self.xl.Bold == -1 else False
+            return self.xl.Bold == -1
         elif isinstance(self.parent.parent, Range):
             return self.xl.Bold
         elif isinstance(self.parent.parent, Shape):
-            return True if self.xl.Bold == -1 else False
+            return self.xl.Bold == -1
         elif isinstance(self.parent.parent.parent, Range):
             return self.xl.Bold
         elif isinstance(self.parent.parent.parent, Shape):
-            return True if self.xl.Bold == -1 else False
+            return self.xl.Bold == -1
 
     @bold.setter
     def bold(self, value):
@@ -1665,15 +1602,15 @@ class Font:
         if isinstance(self.parent, Range):
             return self.xl.Italic
         elif isinstance(self.parent, Shape):
-            return True if self.xl.Italic == -1 else False
+            return self.xl.Italic == -1
         elif isinstance(self.parent.parent, Range):
             return self.xl.Italic
         elif isinstance(self.parent.parent, Shape):
-            return True if self.xl.Italic == -1 else False
+            return self.xl.Italic == -1
         elif isinstance(self.parent.parent.parent, Range):
             return self.xl.Italic
         elif isinstance(self.parent.parent.parent, Shape):
-            return True if self.xl.Italic == -1 else False
+            return self.xl.Italic == -1
 
     @italic.setter
     def italic(self, value):
@@ -1706,39 +1643,40 @@ class Font:
     @color.setter
     def color(self, color_or_rgb):
         # TODO: refactor
-        if self.xl is not None:
-            if isinstance(self.parent, Shape):
-                if isinstance(color_or_rgb, int):
-                    self.xl.Fill.ForeColor.RGB = color_or_rgb
-                else:
-                    self.xl.Fill.ForeColor.RGB = rgb_to_int(color_or_rgb)
-            elif isinstance(self.parent, Range):
-                if isinstance(color_or_rgb, int):
-                    self.xl.Color = color_or_rgb
-                else:
-                    self.xl.Color = rgb_to_int(color_or_rgb)
+        if self.xl is None:
+            return
+        if isinstance(self.parent, Shape):
+            if isinstance(color_or_rgb, int):
+                self.xl.Fill.ForeColor.RGB = color_or_rgb
+            else:
+                self.xl.Fill.ForeColor.RGB = rgb_to_int(color_or_rgb)
+        elif isinstance(self.parent, Range):
+            if isinstance(color_or_rgb, int):
+                self.xl.Color = color_or_rgb
+            else:
+                self.xl.Color = rgb_to_int(color_or_rgb)
 
-            elif isinstance(self.parent.parent, Shape):
-                if isinstance(color_or_rgb, int):
-                    self.xl.Fill.ForeColor.RGB = color_or_rgb
-                else:
-                    self.xl.Fill.ForeColor.RGB = rgb_to_int(color_or_rgb)
-            elif isinstance(self.parent.parent, Range):
-                if isinstance(color_or_rgb, int):
-                    self.xl.Color = color_or_rgb
-                else:
-                    self.xl.Color = rgb_to_int(color_or_rgb)
+        elif isinstance(self.parent.parent, Shape):
+            if isinstance(color_or_rgb, int):
+                self.xl.Fill.ForeColor.RGB = color_or_rgb
+            else:
+                self.xl.Fill.ForeColor.RGB = rgb_to_int(color_or_rgb)
+        elif isinstance(self.parent.parent, Range):
+            if isinstance(color_or_rgb, int):
+                self.xl.Color = color_or_rgb
+            else:
+                self.xl.Color = rgb_to_int(color_or_rgb)
 
-            elif isinstance(self.parent.parent.parent, Shape):
-                if isinstance(color_or_rgb, int):
-                    self.xl.Fill.ForeColor.RGB = color_or_rgb
-                else:
-                    self.xl.Fill.ForeColor.RGB = rgb_to_int(color_or_rgb)
-            elif isinstance(self.parent.parent.parent, Range):
-                if isinstance(color_or_rgb, int):
-                    self.xl.Color = color_or_rgb
-                else:
-                    self.xl.Color = rgb_to_int(color_or_rgb)
+        elif isinstance(self.parent.parent.parent, Shape):
+            if isinstance(color_or_rgb, int):
+                self.xl.Fill.ForeColor.RGB = color_or_rgb
+            else:
+                self.xl.Fill.ForeColor.RGB = rgb_to_int(color_or_rgb)
+        elif isinstance(self.parent.parent.parent, Range):
+            if isinstance(color_or_rgb, int):
+                self.xl.Color = color_or_rgb
+            else:
+                self.xl.Color = rgb_to_int(color_or_rgb)
 
     @property
     def name(self):
@@ -1753,8 +1691,8 @@ class Characters:
     def __init__(self, parent, xl, start=None, length=None):
         self.parent = parent
         self.xl = xl
-        self.start = start if start else 1
-        self.length = length if length else xl().Count
+        self.start = start or 1
+        self.length = length or xl().Count
 
     @property
     def api(self):
@@ -1769,22 +1707,24 @@ class Characters:
         return Font(self, self.xl(self.start, self.length).Font)
 
     def __getitem__(self, item):
-        if isinstance(item, slice):
-            if (item.start and item.start < 0) or (item.stop and item.stop < 0):
-                raise ValueError(
-                    self.__class__.__name__
-                    + " object does not support slicing with negative indexes"
+        if not isinstance(item, slice):
+            return (
+                Characters(parent=self, xl=self.xl, start=item + 1, length=1)
+                if item >= 0
+                else Characters(
+                    parent=self,
+                    xl=self.xl,
+                    start=len(self.text) + 1 + item,
+                    length=1,
                 )
-            start = item.start + 1 if item.start else 1
-            length = item.stop + 1 - start if item.stop else self.length + 1 - start
-            return Characters(parent=self, xl=self.xl, start=start, length=length)
-        else:
-            if item >= 0:
-                return Characters(parent=self, xl=self.xl, start=item + 1, length=1)
-            else:
-                return Characters(
-                    parent=self, xl=self.xl, start=len(self.text) + 1 + item, length=1
-                )
+            )
+        if (item.start and item.start < 0) or (item.stop and item.stop < 0):
+            raise ValueError(
+                f"{self.__class__.__name__} object does not support slicing with negative indexes"
+            )
+        start = item.start + 1 if item.start else 1
+        length = item.stop + 1 - start if item.stop else self.length + 1 - start
+        return Characters(parent=self, xl=self.xl, start=start, length=length)
 
 
 class Collection:
@@ -2009,10 +1949,7 @@ class Chart:
 
     @property
     def name(self):
-        if self.xl_obj is None:
-            return self.xl.Name
-        else:
-            return self.xl_obj.Name
+        return self.xl.Name if self.xl_obj is None else self.xl_obj.Name
 
     @name.setter
     def name(self, value):
@@ -2206,8 +2143,8 @@ class Pictures(Collection):
         if anchor:
             top, left = anchor.top, anchor.left
         else:
-            top = top if top else 0
-            left = left if left else 0
+            top = top or 0
+            left = left or 0
 
         return Picture(
             xl=self.xl.Parent.Shapes.AddPicture(

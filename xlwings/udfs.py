@@ -121,13 +121,12 @@ def get_category(**func_kwargs):
 
 
 def get_async_mode(**func_kwargs):
-    if "async_mode" in func_kwargs:
-        value = func_kwargs.pop("async_mode")
-        if value in ["threading"]:
-            return value
-        raise Exception('The only supported async_mode mode is currently "threading".')
-    else:
+    if "async_mode" not in func_kwargs:
         return None
+    value = func_kwargs.pop("async_mode")
+    if value in ["threading"]:
+        return value
+    raise Exception('The only supported async_mode mode is currently "threading".')
 
 
 def check_bool(kw, default, **func_kwargs):
@@ -163,7 +162,7 @@ def xlfunc(f=None, **kwargs):
                     "name": vname,
                     "pos": vpos,
                     "vba": None,
-                    "doc": "Positional argument " + str(vpos + 1),
+                    "doc": f"Positional argument {str(vpos + 1)}",
                     "vararg": vname == sig["vararg"],
                     "options": {},
                 }
@@ -189,10 +188,7 @@ def xlfunc(f=None, **kwargs):
         f.__xlfunc__["async_mode"] = get_async_mode(**kwargs)
         return f
 
-    if f is None:
-        return inner
-    else:
-        return inner(f)
+    return inner if f is None else inner(f)
 
 
 def xlsub(f=None, **kwargs):
@@ -201,10 +197,7 @@ def xlsub(f=None, **kwargs):
         f.__xlfunc__["sub"] = True
         return f
 
-    if f is None:
-        return inner
-    else:
-        return inner(f)
+    return inner if f is None else inner(f)
 
 
 def xlret(convert=None, **kwargs):
@@ -227,7 +220,7 @@ def xlarg(arg, convert=None, **kwargs):
     def inner(f):
         xlf = xlfunc(f).__xlfunc__
         if arg not in xlf["argmap"]:
-            raise Exception("Invalid argument name '" + arg + "'.")
+            raise Exception(f"Invalid argument name '{arg}'.")
         xla = xlf["argmap"][arg]
         for special in ("vba", "doc"):
             if special in kwargs:
@@ -380,7 +373,7 @@ async def delayed_resize_dynamic_array_formula(target_range, caller):
 
 # Setup temp dir for embedded code
 if __pro__:
-    sys.path[0:0] = [TEMPDIR]  # required for permissioning
+    sys.path[:0] = [TEMPDIR]
 
 
 def get_udf_module(module_name, xl_workbook):
@@ -520,22 +513,22 @@ def call_udf(module_name, func_name, args, this_workbook=None, caller=None):
                 loop,
             )
             return ret
-    else:
-        if is_dynamic_array:
-            cache_key = get_cache_key(func, args, caller)
-            cached_value = cache.get(cache_key)
-            if cached_value is not None:
-                ret = cached_value
-            else:
-                if inspect.iscoroutinefunction(func):
-                    ret = asyncio.run_coroutine_threadsafe(func(*args), loop).result()
-                else:
-                    ret = func(*args)
-                cache[cache_key] = ret
-        elif inspect.iscoroutinefunction(func):
-            ret = asyncio.run_coroutine_threadsafe(func(*args), loop).result()
+    elif is_dynamic_array:
+        cache_key = get_cache_key(func, args, caller)
+        cached_value = cache.get(cache_key)
+        if cached_value is None:
+            ret = (
+                asyncio.run_coroutine_threadsafe(func(*args), loop).result()
+                if inspect.iscoroutinefunction(func)
+                else func(*args)
+            )
+            cache[cache_key] = ret
         else:
-            ret = func(*args)
+            ret = cached_value
+    elif inspect.iscoroutinefunction(func):
+        ret = asyncio.run_coroutine_threadsafe(func(*args), loop).result()
+    else:
+        ret = func(*args)
 
     xl_result = conversion.write(ret, None, ret_info["options"])
 
@@ -567,13 +560,13 @@ def generate_vba_wrapper(module_name, module, f, xl_workbook):
     for svar in map(lambda attr: getattr(module, attr), dir(module)):
         if hasattr(svar, "__xlfunc__"):
             xlfunc = svar.__xlfunc__
-            fname = xlfunc["name"]
             call_in_wizard = xlfunc["call_in_wizard"]
             volatile = xlfunc["volatile"]
 
             ftype = "Sub" if xlfunc["sub"] else "Function"
 
-            func_sig = ftype + " " + fname + "("
+            fname = xlfunc["name"]
+            func_sig = f"{ftype} {fname}("
 
             first = True
             vararg = ""
@@ -614,30 +607,14 @@ def generate_vba_wrapper(module_name, module, f, xl_workbook):
                         for arg in xlfunc["args"]
                         if not arg["vararg"]
                     ]
-                    vba.writeln(
-                        "argsArray = Array(%s)" % tuple({", ".join(non_varargs)})
-                    )
+                    vba.writeln(f'argsArray = Array({tuple({", ".join(non_varargs)})})')
 
                     vba.writeln(
-                        "ReDim Preserve argsArray(0 to UBound("
-                        + vararg
-                        + ") - LBound("
-                        + vararg
-                        + ") + "
-                        + str(len(non_varargs))
-                        + ")"
+                        f"ReDim Preserve argsArray(0 to UBound({vararg}) - LBound({vararg}) + {len(non_varargs)})"
                     )
+                    vba.writeln(f"For k = LBound({vararg}) To UBound({vararg})")
                     vba.writeln(
-                        "For k = LBound(" + vararg + ") To UBound(" + vararg + ")"
-                    )
-                    vba.writeln(
-                        "argsArray("
-                        + str(len(non_varargs))
-                        + " + k - LBound("
-                        + vararg
-                        + ")) = "
-                        + argname
-                        + "(k)"
+                        f"argsArray({len(non_varargs)} + k - LBound({vararg})) = {argname}(k)"
                     )
                     vba.writeln("Next k")
 
@@ -688,7 +665,7 @@ def generate_vba_wrapper(module_name, module, f, xl_workbook):
                             args_vba=args_vba,
                             vba_workbook=vba_workbook,
                         )
-                        vba.writeln("Exit " + ftype)
+                        vba.writeln(f"Exit {ftype}")
                     with vba.block("#Else"):
                         vba.writeln(
                             '{fname} = Py.CallUDF("{module_name}", '
@@ -697,13 +674,13 @@ def generate_vba_wrapper(module_name, module, f, xl_workbook):
                             fname=fname,
                             args_vba=args_vba,
                         )
-                        vba.writeln("Exit " + ftype)
+                        vba.writeln(f"Exit {ftype}")
                     vba.writeln("#End If")
 
                     vba.write_label("failed")
-                    vba.writeln(fname + " = Err.Description")
+                    vba.writeln(f"{fname} = Err.Description")
 
-            vba.writeln("End " + ftype)
+            vba.writeln(f"End {ftype}")
             vba.writeln("")
 
 
@@ -730,8 +707,8 @@ def import_udfs(module_names, xl_workbook):
             )
             code_map = sheet_config.get("RELEASE_EMBED_CODE_MAP", "{}")
             sheetname_to_path = json.loads(code_map)
-            if module_name + ".py" in sheetname_to_path:
-                real_module_name = sheetname_to_path[module_name + ".py"][:-3]
+            if f"{module_name}.py" in sheetname_to_path:
+                real_module_name = sheetname_to_path[f"{module_name}.py"][:-3]
                 module_names.remove(module_name)
                 module_names.append(real_module_name)
 
@@ -762,18 +739,18 @@ def import_udfs(module_names, xl_workbook):
             if hasattr(mvar, "__xlfunc__"):
                 xlfunc = mvar.__xlfunc__
                 xlret = xlfunc["ret"]
-                xlargs = xlfunc["args"]
                 fname = xlfunc["name"]
                 fdoc = xlret["doc"][:255]
-                fcategory = xlfunc["category"]
-
                 excel_version = [
                     int(x) for x in re.split("[,\\.]", xl_workbook.Application.Version)
                 ]
                 if excel_version[0] >= 14:
+                    xlargs = xlfunc["args"]
                     argdocs = [arg["doc"][:255] for arg in xlargs if not arg["vba"]]
+                    fcategory = xlfunc["category"]
+
                     xl_workbook.Application.MacroOptions(
-                        "'" + xl_workbook.Name + "'!" + fname,
+                        f"'{xl_workbook.Name}'!{fname}",
                         Description=fdoc,
                         HasMenu=False,
                         MenuText=None,
@@ -783,11 +760,11 @@ def import_udfs(module_names, xl_workbook):
                         StatusBar=None,
                         HelpContextID=None,
                         HelpFile=None,
-                        ArgumentDescriptions=argdocs if argdocs else None,
+                        ArgumentDescriptions=argdocs or None,
                     )
                 else:
                     xl_workbook.Application.MacroOptions(
-                        "'" + xl_workbook.Name + "'!" + fname, Description=fdoc
+                        f"'{xl_workbook.Name}'!{fname}", Description=fdoc
                     )
 
     # try to delete the temp file - doesn't matter too much if it fails

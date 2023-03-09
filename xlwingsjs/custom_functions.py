@@ -7,10 +7,7 @@ from xlwings import pro
 
 @pro.func
 def add(first, second, third=None):
-    if third:
-        return first + second + third
-    else:
-        return first + second
+    return first + second + third if third else first + second
 
 
 @pro.func
